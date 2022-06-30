@@ -102,7 +102,8 @@ class HyperModel(kt.HyperModel):
         if type == 'valid':
             prefix = "val_"
         for metric in metrics:
-           history[f'{prefix}{metric.name}'].append(metric.result().numpy())
+           # TODO: if not float inversion, it does not get rounded...
+           history[f'{prefix}{metric.name}'].append(round(float(metric.result().numpy()), 3))
         return history
 
 
@@ -145,17 +146,14 @@ class HyperModel(kt.HyperModel):
         for epoch in range(self.n_epochs):
             for x_batch, y_batch in ds_train:
                 _run_train_step(x_batch, y_batch)
-            epoch_train_loss = round(
-                float(epoch_train_loss_metric.result().numpy()), 3)
-
+            epoch_train_loss = round(float(epoch_train_loss_metric.result().numpy()), 3)
             history['loss'].append(epoch_train_loss)
             history = self.save_metrics("train", metrics, history)
             metrics = self.reset_metrics(metrics)
 
             for x_batch, y_batch in ds_valid:
                 _run_val_step(x_batch, y_batch)
-            epoch_val_loss = round(
-                float(epoch_val_loss_metric.result().numpy()), 3)
+            epoch_val_loss = round(float(epoch_val_loss_metric.result().numpy()), 3)
             history['val_loss'].append(epoch_val_loss)
             history = self.save_metrics('valid', metrics, history)
             metrics = self.reset_metrics(metrics)
@@ -166,20 +164,18 @@ class HyperModel(kt.HyperModel):
             if verbose:
                 print()
                 print(f"Epoch {epoch+1}/{self.n_epochs}")
-
                 tr_metric_names = ['loss'] + [metric.name for metric in metrics]
                 val_metric_names = ['val_loss'] + [f"val_{metric.name}" for metric in metrics]
-
                 print_string = "train"
                 for tr_metric_name in tr_metric_names:
                     print_string += f" - {tr_metric_name}: {history[tr_metric_name][epoch]}"
                 print(print_string)
-
                 print_string = 'validation'
                 for val_metric_name in val_metric_names:
                     print_string += f" - {val_metric_name}: {history[val_metric_name][epoch]}"
                 print(print_string)
-
+        # If no return value -> TypeError
+        return 3
 
 
 

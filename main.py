@@ -18,10 +18,12 @@ if __name__ == '__main__':
     test_ds = tf.data.Dataset.from_tensor_slices((img_test / 255.0, label_test)).batch(32)
 
     metrics = [
-        # tf.keras.metrics.Accuracy(),
-               # tf.keras.metrics.Recall(),
-               # tf.keras.metrics.Precision(),
-               # tf.keras.metrics.AUC()
+                tf.keras.metrics.SparseCategoricalAccuracy()
+                # Q: Can we not use below metric in multi-class?
+               # ,tf.keras.metrics.Accuracy()
+               # ,tf.keras.metrics.Recall()
+               # ,tf.keras.metrics.Precision()
+               # ,tf.keras.metrics.AUC()
                ]
     inputs = tf.keras.Input(shape=(28,28))
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)

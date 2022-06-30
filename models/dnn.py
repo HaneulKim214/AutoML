@@ -1,4 +1,6 @@
+import keras_tuner as kt
 import tensorflow as tf
+
 
 def simple_dnn(inputs, dnn_units, dnn_dropout, active_func):
     """
@@ -59,3 +61,41 @@ def build_model(hp):
                   loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                   metrics=['accuracy'])
     return model
+
+class SemiCustomHyperModel(kt.HyperModel):
+    def __init__(self, model_hyp_search_space, compile_hyp_search_space, inputs, loss_fn):
+        """
+        :param model_hyp_search_space: dict, search space w.r.t model
+        :param compile_hyp_search_space: dict, search space containing hyperparameters relating to compile
+        """
+        self.dnn_layers_ss = model_hyp_search_space['dnn_layers_ss']
+        self.dnn_units_min, self.dnn_units_max = model_hyp_search_space['dnn_units_minmax']
+        self.dropout_ss = model_hyp_search_space['dropout_ss']
+
+        self.active_func_ss = compile_hyp_search_space['active_func_ss']
+
+        self.optimizer_ss = compile_hyp_search_space['optimizer_ss']
+        self.lr_min, self.lr_max =  compile_hyp_search_space['learning_rate_minmax']
+
+        self.inputs = inputs
+        self.loss_fn = loss_fn
+        self.n_epochs = 10
+
+
+    def build(self, hp):
+        """build your model"""
+        # Note hp.choice, needs to happen here b.c. build function is the function
+        # that called everytime tuner starts a new search
+        # select hyperparameters for each build
+        active_func = hp.Choice('activation', self.active_func_ss)
+        n_layers = hp.Choice("n_layers", self.dnn_layers_ss)
+        dnn_dropout = hp.Boolean("dropout")
+        dnn_units = []
+        for layer_i in range(n_layers):
+            n_units = hp.Int(f"{layer_i}_units", min_value=self.dnn_units_min, max_value=self.dnn_units_max)
+            dnn_units.append(n_units)
+
+        # Choose model that you want and simply pass in as parameters hyperparameters chosen at each build.
+        possible_model_dict = {"simple_dnn": simple_dnn}
+        model = possible_model_dict['simple_dnn'](self.inputs, dnn_units, dnn_dropout, active_func)
+        return model
