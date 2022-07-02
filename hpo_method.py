@@ -1,20 +1,40 @@
 import keras_tuner as kt
+import os
 import tensorflow as tf
+from pathlib import Path
 
 from models.dnn import simple_dnn
 
 
+def get_project_name(path, project_name):
+    """
+    Check if project_name exists given path. Generate new project_name that doesn't already exists.
+    This is because keras tuner don't run when same name directory that saves trial history already exists.
+
+    :param path:
+    :return:
+    """
+    version = 2
+    while project_name in os.listdir(path):
+        # assuming projectname is in {ProjectName}_v1 form. --> better to use regex however too lazy.. :)
+        project_name = project_name.split("_")[0] + f"_v{version}"
+        version += 1
+    return project_name
+
 def build_tuner(model, hpo_method, objective, dir_name):
+    current_path = os.path.dirname(os.path.abspath(__file__))
+    tuner_path = os.path.join(current_path, dir_name)
+    project_name = get_project_name(tuner_path, project_name=hpo_method)
+
     if hpo_method == "RandomSearch":
         tuner = kt.RandomSearch(model, objective=objective, max_trials=3, executions_per_trial=1,
-                                project_name=hpo_method, directory=dir_name)
+                                project_name=project_name, directory=dir_name)
     elif hpo_method == "Hyperband":
         tuner = kt.Hyperband(model, objective=objective, max_epochs=3, executions_per_trial=1,
-                             project_name=hpo_method)
+                             project_name=project_name)
     elif hpo_method == "BayesianOptimization":
         tuner = kt.BayesianOptimization(model, objective=objective, max_trials=3, executions_per_trial=1,
-                                        project_name=hpo_method)
-
+                                        project_name=project_name)
     return tuner
 
 
@@ -35,7 +55,6 @@ class HyperModel(kt.HyperModel):
 
         self.inputs = inputs
         self.loss_fn = loss_fn
-        self.n_epochs = 10
 
 
     def build(self, hp):
@@ -55,6 +74,85 @@ class HyperModel(kt.HyperModel):
         possible_model_dict = {"simple_dnn": simple_dnn}
         model = possible_model_dict['simple_dnn'](self.inputs, dnn_units, dnn_dropout, active_func)
         return model
+
+    def fit(self, hp, model, ds_train, metrics, callbacks=None, verbose=True, **kwargs):
+        @tf.function
+        def _run_train_step(images, labels):
+            with tf.GradientTape() as tape:
+                logits = model(images, training=True)
+                loss = self.loss_fn(labels, logits)
+                if model.losses: # adding regularization term if exists
+                    loss += tf.math.add_n(model.losses)
+            gradients = tape.gradient(loss, model.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+            # update metrics
+            epoch_train_loss_metric.update_state(loss)
+            for metric in metrics:
+                metric.update_state(y_batch, logits)
+
+        @tf.function
+        def _run_val_step(images, labels):
+            logits = model(images, training=False)
+            loss = self.loss_fn(labels, logits)
+            epoch_val_loss_metric.update_state(loss)
+            for metric in metrics:
+                metric.update_state(y_batch, logits)
+
+        history = self.prepare_history_dict(metrics)
+
+        # ??? Is this only way to extract kwargs?
+        ds_valid = kwargs['validation_data']
+        epochs = kwargs['epochs']
+
+        optimizer_name = hp.Choice('optimizer', self.optimizer_ss)
+        lr = hp.Float('learning_rate', min_value=self.lr_min, max_value=self.lr_max, sampling='log')
+        optimizer = self.get_optimizer(optimizer_name, lr)
+
+        epoch_val_loss_metric = tf.keras.metrics.Mean()
+        epoch_train_loss_metric = tf.keras.metrics.Mean()
+        for callback in callbacks:
+            callback.model = model
+
+        best_val_epoch_loss = float("inf")
+
+        for epoch in range(epochs):
+            for x_batch, y_batch in ds_train:
+                _run_train_step(x_batch, y_batch)
+            epoch_train_loss = round(float(epoch_train_loss_metric.result().numpy()), 3)
+            history['loss'].append(epoch_train_loss)
+            history = self.save_metrics("train", metrics, history)
+            metrics = self.reset_metrics(metrics)
+
+            for x_batch, y_batch in ds_valid:
+                _run_val_step(x_batch, y_batch)
+            epoch_val_loss = round(float(epoch_val_loss_metric.result().numpy()), 3)
+            history['val_loss'].append(epoch_val_loss)
+            history = self.save_metrics('valid', metrics, history)
+            metrics = self.reset_metrics(metrics)
+
+            epoch_train_loss_metric.reset_states()
+            epoch_val_loss_metric.reset_states()
+
+            if verbose:
+                print()
+                print(f"Epoch {epoch + 1}/{epochs}")
+                tr_metric_names = ['loss'] + [metric.name for metric in metrics]
+                val_metric_names = ['val_loss'] + [f"val_{metric.name}" for metric in metrics]
+                print_string = "train"
+                for tr_metric_name in tr_metric_names:
+                    print_string += f" - {tr_metric_name}: {history[tr_metric_name][epoch]}"
+                print(print_string)
+                print_string = 'validation'
+                for val_metric_name in val_metric_names:
+                    print_string += f" - {val_metric_name}: {history[val_metric_name][epoch]}"
+                print(print_string)
+
+            # Choose best model using validation loss - ??? need to check if this is true.
+            best_val_epoch_loss = min(best_val_epoch_loss, epoch_val_loss)
+
+        # If no return value -> TypeError
+        return best_val_epoch_loss
 
     @staticmethod
     def get_optimizer(optimizer_name, lr):
@@ -102,80 +200,9 @@ class HyperModel(kt.HyperModel):
         if type == 'valid':
             prefix = "val_"
         for metric in metrics:
-           # TODO: if not float inversion, it does not get rounded...
-           history[f'{prefix}{metric.name}'].append(round(float(metric.result().numpy()), 3))
+            # TODO: if not float inversion, it does not get rounded...
+            history[f'{prefix}{metric.name}'].append(round(float(metric.result().numpy()), 3))
         return history
-
-
-    def fit(self, hp, model, ds_train, metrics, callbacks=None, verbose=True, **kwargs):
-        # @tf.function
-        def _run_train_step(images, labels):
-            with tf.GradientTape() as tape:
-                logits = model(images, training=True)
-                loss = self.loss_fn(labels, logits)
-                if model.losses: # adding regularization term if exists
-                    loss += tf.math.add_n(model.losses)
-            gradients = tape.gradient(loss, model.trainable_variables)
-            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-
-            # update metrics
-            epoch_train_loss_metric.update_state(loss)
-            for metric in metrics:
-                metric.update_state(y_batch, logits)
-
-        # @tf.function
-        def _run_val_step(images, labels):
-            logits = model(images, training=False)
-            loss = self.loss_fn(labels, logits)
-            epoch_val_loss_metric.update_state(loss)
-            for metric in metrics:
-                metric.update_state(y_batch, logits)
-
-        history = self.prepare_history_dict(metrics)
-
-        ds_valid = kwargs['validation_data']
-        optimizer_name = hp.Choice('optimizer', self.optimizer_ss)
-        lr = hp.Float('learning_rate', min_value=self.lr_min, max_value=self.lr_max, sampling='log')
-        optimizer = self.get_optimizer(optimizer_name, lr)
-
-        epoch_val_loss_metric = tf.keras.metrics.Mean()
-        epoch_train_loss_metric = tf.keras.metrics.Mean()
-        for callback in callbacks:
-            callback.model = model
-
-        for epoch in range(self.n_epochs):
-            for x_batch, y_batch in ds_train:
-                _run_train_step(x_batch, y_batch)
-            epoch_train_loss = round(float(epoch_train_loss_metric.result().numpy()), 3)
-            history['loss'].append(epoch_train_loss)
-            history = self.save_metrics("train", metrics, history)
-            metrics = self.reset_metrics(metrics)
-
-            for x_batch, y_batch in ds_valid:
-                _run_val_step(x_batch, y_batch)
-            epoch_val_loss = round(float(epoch_val_loss_metric.result().numpy()), 3)
-            history['val_loss'].append(epoch_val_loss)
-            history = self.save_metrics('valid', metrics, history)
-            metrics = self.reset_metrics(metrics)
-
-            epoch_train_loss_metric.reset_states()
-            epoch_val_loss_metric.reset_states()
-
-            if verbose:
-                print()
-                print(f"Epoch {epoch+1}/{self.n_epochs}")
-                tr_metric_names = ['loss'] + [metric.name for metric in metrics]
-                val_metric_names = ['val_loss'] + [f"val_{metric.name}" for metric in metrics]
-                print_string = "train"
-                for tr_metric_name in tr_metric_names:
-                    print_string += f" - {tr_metric_name}: {history[tr_metric_name][epoch]}"
-                print(print_string)
-                print_string = 'validation'
-                for val_metric_name in val_metric_names:
-                    print_string += f" - {val_metric_name}: {history[val_metric_name][epoch]}"
-                print(print_string)
-        # If no return value -> TypeError
-        return 3
 
 
 

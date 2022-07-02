@@ -1,0 +1,17 @@
+
+[Keras-Tuner]
+ - class Oracleoracle implements hyperparameter optimization algorithm
+ - class Tuner : manages building, training, evaluation and saving of the keras models.
+ - class BaseTuner : base class for all Tuners, manages search loop, Oracle, logging, saving, etc...
+   - _populate_initial_space() : Populates initial search space for oracle
+     - This is where initial build of our custom HyperModel happens.
+       - hyperparameter gets chosen here.
+     - at the end of BaseTuner init function.
+
+
+tuner.search()
+  - results = self.run_trial()
+    - called multiple times during 'search' to build and evaluate
+      the models with diff hyp and returns objective value.
+    - _build_and_fit_model() : build then fit model.
+    - self.oracle.update_trial() : report status/result of current trial.
