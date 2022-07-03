@@ -18,20 +18,23 @@ if __name__ == '__main__':
     train_ds = tf.data.Dataset.from_tensor_slices((img_train / 255.0, label_train)).batch(32)
     test_ds = tf.data.Dataset.from_tensor_slices((img_test / 255.0, label_test)).batch(32)
 
+    callbacks = [tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=1, verbose=1)]
     metrics = [
         tf.keras.metrics.SparseCategoricalAccuracy()
-        # Q: Can we not use below metric in multi-class?
         # ,tf.keras.metrics.Accuracy()
         # ,tf.keras.metrics.Recall()
         # ,tf.keras.metrics.Precision()
         # ,tf.keras.metrics.AUC()
     ]
+
     inputs = tf.keras.Input(shape=(28,28))
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-    objective = kt.Objective('val_accuracy', direction='max')
     hypermodel = HyperModel(model_hyp_search_space, compile_hyp_search_space, inputs, loss_fn)
-    tuner = build_tuner(hypermodel, "RandomSearch", objective, "simple_dnn_v1")
-    tuner.search(train_ds, validation_data=test_ds, metrics=metrics, epochs=1)
+
+    objective = kt.Objective('val_sparse_categorical_accuracy', direction='max')
+    kwargs = {"objective":objective, "dir_name":"simple_dnn_v1"}
+    tuner = build_tuner(hypermodel, hpo_method="RandomSearch", num_trials=3, **kwargs)
+    tuner.search(train_ds, ds_valid=test_ds, metrics=metrics, epochs=10, callbacks=callbacks)
 
     # No custom
     # randomsearch_tuner = build_tuner(build_model, "RandomSearch", obj, dir_name)
@@ -41,5 +44,5 @@ if __name__ == '__main__':
     total_ds = train_ds.concatenate(test_ds)
     best_hps = tuner.get_best_hyperparameters()[0]
     best_model = hypermodel.build(best_hps)
-    tuner.hypermodel.fit(best_hps, simple_dnn, total_ds, metrics=metrics, epochs=10)
+    tuner.hypermodel.fit(best_hps, best_model, total_ds, metrics=metrics, epochs=10)
     # best_model.fit(total_ds, simple_dnn, epochs=10)

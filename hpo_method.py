@@ -21,19 +21,22 @@ def get_project_name(path, project_name):
         version += 1
     return project_name
 
-def build_tuner(model, hpo_method, objective, dir_name):
+def build_tuner(model, hpo_method, num_trials, **kwargs):
+    objective = kwargs.get("objective")
+    dir_name = kwargs.get("dir_name", "Untitled")
+
     current_path = os.path.dirname(os.path.abspath(__file__))
     tuner_path = os.path.join(current_path, dir_name)
     project_name = get_project_name(tuner_path, project_name=hpo_method)
 
     if hpo_method == "RandomSearch":
-        tuner = kt.RandomSearch(model, objective=objective, max_trials=3, executions_per_trial=1,
+        tuner = kt.RandomSearch(model, objective=objective, max_trials=num_trials, executions_per_trial=1,
                                 project_name=project_name, directory=dir_name)
     elif hpo_method == "Hyperband":
-        tuner = kt.Hyperband(model, objective=objective, max_epochs=3, executions_per_trial=1,
+        tuner = kt.Hyperband(model, objective=objective, max_epochs=num_trials, executions_per_trial=1,
                              project_name=project_name, directory=dir_name, overwrite=True)
     elif hpo_method == "BayesianOptimization":
-        tuner = kt.BayesianOptimization(model, objective=objective, max_trials=3, executions_per_trial=1,
+        tuner = kt.BayesianOptimization(model, objective=objective, max_trials=num_trials, executions_per_trial=1,
                                         project_name=project_name, directory=dir_name, overwrite=True)
     return tuner
 
@@ -56,7 +59,6 @@ class HyperModel(kt.HyperModel):
         self.inputs = inputs
         self.loss_fn = loss_fn
 
-
     def build(self, hp):
         """build your model"""
         # Note hp.choice, needs to happen here b.c. build function is the function
@@ -75,7 +77,7 @@ class HyperModel(kt.HyperModel):
         model = possible_model_dict['simple_dnn'](self.inputs, dnn_units, dnn_dropout, active_func)
         return model
 
-    def fit(self, hp, model, ds_train, metrics, ds_valid=None, callbacks=None, verbose=True, **kwargs):
+    def fit(self, hp, model, ds_train, metrics, ds_valid=None, callbacks=[], verbose=True, **kwargs):
         @tf.function
         def _run_train_step(images, labels):
             with tf.GradientTape() as tape:
@@ -100,9 +102,6 @@ class HyperModel(kt.HyperModel):
                 metric.update_state(y_batch, logits)
 
         history = self.prepare_history_dict(metrics)
-
-        # ??? Is this only way to extract kwargs?
-        ds_valid = kwargs['validation_data']
         epochs = kwargs.get('epochs', 10)
 
         optimizer_name = hp.Choice('optimizer', self.optimizer_ss)
@@ -114,8 +113,6 @@ class HyperModel(kt.HyperModel):
         for callback in callbacks:
             callback.model = model
 
-        best_val_epoch_loss = float("inf")
-
         for epoch in range(epochs):
             for x_batch, y_batch in ds_train:
                 _run_train_step(x_batch, y_batch)
@@ -123,16 +120,16 @@ class HyperModel(kt.HyperModel):
             history['loss'].append(epoch_train_loss)
             history = self.save_metrics("train", metrics, history)
             metrics = self.reset_metrics(metrics)
-
-            for x_batch, y_batch in ds_valid:
-                _run_val_step(x_batch, y_batch)
-            epoch_val_loss = round(float(epoch_val_loss_metric.result().numpy()), 3)
-            history['val_loss'].append(epoch_val_loss)
-            history = self.save_metrics('valid', metrics, history)
-            metrics = self.reset_metrics(metrics)
-
             epoch_train_loss_metric.reset_states()
-            epoch_val_loss_metric.reset_states()
+
+            if ds_valid != None:
+                for x_batch, y_batch in ds_valid:
+                    _run_val_step(x_batch, y_batch)
+                epoch_val_loss = round(float(epoch_val_loss_metric.result().numpy()), 3)
+                history['val_loss'].append(epoch_val_loss)
+                history = self.save_metrics('valid', metrics, history)
+                metrics = self.reset_metrics(metrics)
+                epoch_val_loss_metric.reset_states()
 
             if verbose:
                 print()
@@ -143,16 +140,12 @@ class HyperModel(kt.HyperModel):
                 for tr_metric_name in tr_metric_names:
                     print_string += f" - {tr_metric_name}: {history[tr_metric_name][epoch]}"
                 print(print_string)
-                print_string = 'validation'
-                for val_metric_name in val_metric_names:
-                    print_string += f" - {val_metric_name}: {history[val_metric_name][epoch]}"
-                print(print_string)
-
-            # Choose best model using validation loss - ??? need to check if this is true.
-            best_val_epoch_loss = min(best_val_epoch_loss, epoch_val_loss)
-
-        # If no return value -> TypeError
-        return best_val_epoch_loss
+                if ds_valid != None:
+                    print_string = 'validation'
+                    for val_metric_name in val_metric_names:
+                        print_string += f" - {val_metric_name}: {history[val_metric_name][epoch]}"
+                    print(print_string)
+        return history
 
     @staticmethod
     def get_optimizer(optimizer_name, lr):
