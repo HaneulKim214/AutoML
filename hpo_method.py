@@ -31,10 +31,10 @@ def build_tuner(model, hpo_method, objective, dir_name):
                                 project_name=project_name, directory=dir_name)
     elif hpo_method == "Hyperband":
         tuner = kt.Hyperband(model, objective=objective, max_epochs=3, executions_per_trial=1,
-                             project_name=project_name)
+                             project_name=project_name, directory=dir_name, overwrite=True)
     elif hpo_method == "BayesianOptimization":
         tuner = kt.BayesianOptimization(model, objective=objective, max_trials=3, executions_per_trial=1,
-                                        project_name=project_name)
+                                        project_name=project_name, directory=dir_name, overwrite=True)
     return tuner
 
 
@@ -75,7 +75,7 @@ class HyperModel(kt.HyperModel):
         model = possible_model_dict['simple_dnn'](self.inputs, dnn_units, dnn_dropout, active_func)
         return model
 
-    def fit(self, hp, model, ds_train, metrics, callbacks=None, verbose=True, **kwargs):
+    def fit(self, hp, model, ds_train, metrics, ds_valid=None, callbacks=None, verbose=True, **kwargs):
         @tf.function
         def _run_train_step(images, labels):
             with tf.GradientTape() as tape:
@@ -103,7 +103,7 @@ class HyperModel(kt.HyperModel):
 
         # ??? Is this only way to extract kwargs?
         ds_valid = kwargs['validation_data']
-        epochs = kwargs['epochs']
+        epochs = kwargs.get('epochs', 10)
 
         optimizer_name = hp.Choice('optimizer', self.optimizer_ss)
         lr = hp.Float('learning_rate', min_value=self.lr_min, max_value=self.lr_max, sampling='log')

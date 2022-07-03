@@ -31,7 +31,7 @@ if __name__ == '__main__':
     objective = kt.Objective('val_accuracy', direction='max')
     hypermodel = HyperModel(model_hyp_search_space, compile_hyp_search_space, inputs, loss_fn)
     tuner = build_tuner(hypermodel, "RandomSearch", objective, "simple_dnn_v1")
-    tuner.search(train_ds, validation_data=test_ds, metrics=metrics, epochs=3)
+    tuner.search(train_ds, validation_data=test_ds, metrics=metrics, epochs=1)
 
     # No custom
     # randomsearch_tuner = build_tuner(build_model, "RandomSearch", obj, dir_name)
@@ -41,4 +41,5 @@ if __name__ == '__main__':
     total_ds = train_ds.concatenate(test_ds)
     best_hps = tuner.get_best_hyperparameters()[0]
     best_model = hypermodel.build(best_hps)
-    best_model.fit(total_ds, epochs=10)
+    tuner.hypermodel.fit(best_hps, simple_dnn, total_ds, metrics=metrics, epochs=10)
+    # best_model.fit(total_ds, simple_dnn, epochs=10)
