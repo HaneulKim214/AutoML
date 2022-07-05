@@ -1,0 +1,69 @@
+
+[Keras-Tuner]
+ - class Oracle : implements hyperparameter optimization algorithm
+ - class Tuner : manages building, training, evaluation and saving of the keras models.
+ - class BaseTuner : base class for all Tuners, manages search loop, Oracle, logging, saving, etc...
+   - _populate_initial_space() : Populates initial search space for oracle
+     - This is where initial build of our custom HyperModel happens.
+       - hyperparameter gets chosen here.
+     - at the end of BaseTuner init function.
+
+
+tuner.search()
+  - results = self.run_trial()
+    - called multiple times during 'search' to build and evaluate
+      the models with diff hyp and returns objective value.
+    - _build_and_fit_model() : build then fit model.
+    - self.oracle.update_trial() : report status/result of current trial.
+
+
+
+Tips:
+ - Keras tuner don't run when you want to save your search results to already existing directory.
+ -
+
+
+ class SparseCategoricalAccuracy(MeanMetricWrapper):
+  """Calculates how often predictions match integer labels.
+
+  ```python
+  acc = np.dot(sample_weight, np.equal(y_true, np.argmax(y_pred, axis=1))
+  ```
+
+  You can provide logits of classes as `y_pred`, since argmax of
+  logits and probabilities are same.
+
+  This metric creates two local variables, `total` and `count` that are used to
+  compute the frequency with which `y_pred` matches `y_true`. This frequency is
+  ultimately returned as `sparse categorical accuracy`: an idempotent operation
+  that simply divides `total` by `count`.
+
+  If `sample_weight` is `None`, weights default to 1.
+  Use `sample_weight` of 0 to mask values.
+
+  Args:
+    name: (Optional) string name of the metric instance.
+    dtype: (Optional) data type of the metric result.
+
+  Standalone usage:
+
+  >>> m = tf.keras.metrics.SparseCategoricalAccuracy()
+  >>> m.update_state([[2], [1]], [[0.1, 0.6, 0.3], [0.05, 0.95, 0]])
+  >>> m.result().numpy()
+  0.5
+
+  >>> m.reset_state()
+  >>> m.update_state([[2], [1]], [[0.1, 0.6, 0.3], [0.05, 0.95, 0]],
+  ...                sample_weight=[0.7, 0.3])
+  >>> m.result().numpy()
+  0.3
+
+  Usage with `compile()` API:
+
+  ```python
+  model.compile(
+      optimizer='sgd',
+      loss='mse',
+      metrics=[tf.keras.metrics.SparseCategoricalAccuracy()])
+  ```
+  """

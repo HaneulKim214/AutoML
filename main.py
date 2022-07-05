@@ -6,13 +6,6 @@ from const import model_hyp_search_space, compile_hyp_search_space
 from models.dnn import simple_dnn
 
 
-
-
-
-
-
-
-
 if __name__ == '__main__':
     (img_train, label_train), (img_test, label_test) = tf.keras.datasets.fashion_mnist.load_data()
     train_ds = tf.data.Dataset.from_tensor_slices((img_train / 255.0, label_train)).batch(32)
@@ -34,15 +27,11 @@ if __name__ == '__main__':
     objective = kt.Objective('val_sparse_categorical_accuracy', direction='max')
     kwargs = {"objective":objective, "dir_name":"simple_dnn_v1"}
     tuner = build_tuner(hypermodel, hpo_method="RandomSearch", num_trials=3, **kwargs)
-    tuner.search(train_ds, ds_valid=test_ds, metrics=metrics, epochs=10, callbacks=callbacks)
-
-    # No custom
-    # randomsearch_tuner = build_tuner(build_model, "RandomSearch", obj, dir_name)
-    # randomsearch_tuner.search(train_ds, epochs=3, validation_data=test_ds)
+    tuner.search(train_ds, ds_valid=test_ds, metrics=metrics, epochs=3, callbacks=callbacks)
 
     # train with best hyperparameter on full dataset.
     total_ds = train_ds.concatenate(test_ds)
     best_hps = tuner.get_best_hyperparameters()[0]
     best_model = hypermodel.build(best_hps)
-    tuner.hypermodel.fit(best_hps, best_model, total_ds, metrics=metrics, epochs=10)
-    # best_model.fit(total_ds, simple_dnn, epochs=10)
+    history = tuner.hypermodel.fit(best_hps, best_model, total_ds, metrics=metrics, epochs=10)
+

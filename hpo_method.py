@@ -1,4 +1,5 @@
 import keras_tuner as kt
+import numpy as np
 import os
 import tensorflow as tf
 from pathlib import Path
@@ -38,6 +39,7 @@ def build_tuner(model, hpo_method, num_trials, **kwargs):
     elif hpo_method == "BayesianOptimization":
         tuner = kt.BayesianOptimization(model, objective=objective, max_trials=num_trials, executions_per_trial=1,
                                         project_name=project_name, directory=dir_name, overwrite=True)
+
     return tuner
 
 
@@ -92,6 +94,11 @@ class HyperModel(kt.HyperModel):
             epoch_train_loss_metric.update_state(loss)
             for metric in metrics:
                 metric.update_state(y_batch, logits)
+
+            # print(metric.result())
+            # total = len(logits)
+            # true_cnt = np.sum(np.equal(y_batch, np.argmax(logits, axis=1)))
+            # print(f"Accuracy = {round(true_cnt / total, 4)}")
 
         @tf.function
         def _run_val_step(images, labels):
@@ -183,7 +190,6 @@ class HyperModel(kt.HyperModel):
         history['val_loss'] = []
         for metric in metrics:
             history[f"val_{metric.name}"] = []
-
         return history
 
     @staticmethod
@@ -194,7 +200,7 @@ class HyperModel(kt.HyperModel):
             prefix = "val_"
         for metric in metrics:
             # TODO: if not float inversion, it does not get rounded...
-            history[f'{prefix}{metric.name}'].append(round(float(metric.result().numpy()), 3))
+            history[f'{prefix}{metric.name}'].append(float(metric.result().numpy()))
         return history
 
 
